@@ -258,8 +258,9 @@ Before you begin, ensure you have:
 To stop the running containers:
 ```bash
 docker compose down
-
+```
 ## Authors
 
 - [@nani-1205](https://github.com/nani-1205)
+
 - [@dattaprabhakar](https://github.com/dattaprabhakar)
