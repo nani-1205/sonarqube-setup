@@ -1,0 +1,97 @@
+# Save this as docker-compose.yml
+
+# Note: The 'version' attribute is obsolete in recent Docker Compose versions
+# and can be safely removed. Keeping it for compatibility with older syntax.
+version: "3.8"
+
+services:
+  # PostgreSQL database for SonarQube
+  postgres:
+    image: postgres:13
+    container_name: sonarqube_postgres
+    environment:
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: sonar
+      POSTGRES_DB: sonarqube
+    ports:
+      # Map PostgreSQL port on the host to the container port
+      - "5432:5432"
+    volumes:
+      # Persistent volume for database data
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      # Connect to the shared network
+      - sonarnet
+
+  # Service to download plugins into the shared volume before SonarQube starts.
+  # This ensures plugins are available on the volume when SonarQube mounts it.
+  sonarqube_init_plugins:
+    image: alpine:latest # Use a lightweight image suitable for running shell scripts
+    container_name: sonarqube_init_plugins_download
+    # This service needs access to the sonarqube_extensions volume and the script file.
+    volumes:
+      # Mount the target SonarQube extensions volume where plugins should go
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      # Mount the download script into the container
+      - ./download_plugins.sh:/app/download_plugins.sh:ro # Mount script read-only
+    working_dir: /app # Set working directory to where the script is mounted
+    # Define the plugin versions as environment variables for this container.
+    # Docker Compose will read the values from your host environment (.env file).
+    environment:
+      # Pass only the needed variable
+      - CNESREPORT_VERSION=${CNESREPORT_VERSION}
+      # Remove all other environment variables that were here before
+    # Command to execute the mounted script.
+    command: ["/app/download_plugins.sh"]
+    networks:
+      # Needs network access to download plugins from the internet
+      - sonarnet
+    # Ensure this container runs its command once and exits, does not restart automatically
+    restart: "no"
+
+  # SonarQube application service
+  sonarqube:
+    image: sonarqube:community
+    container_name: sonarqube_ce
+    # This service depends on postgres and the plugin download service
+    depends_on:
+      - postgres
+      - sonarqube_init_plugins
+    environment:
+      # Database connection details (using the service name 'postgres')
+      SONAR_JDBC_URL: jdbc:postgresql://postgres:5432/sonarqube
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: sonar
+      # Optional: Configure JVM memory settings if needed, especially with many plugins
+      # SONAR_SEARCH_JAVA_OPTS: "-Xmx1g -Xms256m"
+      # SONAR_WEB_JAVA_OPTS: "-Xmx512m -Xms256m"
+      # SONAR_CE_JAVA_OPTS: "-Xmx512m -Xms256m"
+    ports:
+      # Map SonarQube web UI port on the host to the container port
+      - "9000:9000"
+    volumes:
+      # Persistent volume for SonarQube data (configuration, logs, search index)
+      - sonarqube_data:/opt/sonarqube/data
+      # Persistent volume for extensions (plugins, etc.).
+      # This volume is populated by the init_plugins service.
+      - sonarqube_extensions:/opt/sonarqube/extensions
+    networks:
+      # Connect to the shared network
+      - sonarnet
+    # Optional: Add a healthcheck to verify SonarQube is fully started before considering it 'healthy'
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:9000/api/system/ping"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 5
+    #   start_period: 60s # Gives SonarQube extra time to start up with plugins
+
+# Define the named volumes for persistence
+volumes:
+  postgres_data:
+  sonarqube_data:
+  sonarqube_extensions:
+
+# Define the shared network
+networks:
+  sonarnet:
